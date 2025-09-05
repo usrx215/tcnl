@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>the computer never lies</title>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+  <style>
+    body {
+      font-family: monospace;
+      background: linear-gradient(135deg, #555555, #c0c0c0);
+      color: #111;
+      padding: 1em;
+      margin: 0;
+    }
+    #logo {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 32px;
+      height: 32px;
+    }
+    #chat {
+      white-space: pre-wrap;
+      margin-bottom: 1em;
+      max-height: 75vh;
+      overflow-y: auto;
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .msg-img {
+      max-width: 200px;
+      display: block;
+      margin: 5px 0;
+      border-radius: 4px;
+    }
+    input[type="text"] {
+      width: 60%;
+      padding: 0.3em;
+      border-radius: 4px;
+      border: 1px solid #444;
+    }
+    input[type="file"] {
+      margin-left: 0.5em;
+    }
+    button {
+      padding: 0.3em 1em;
+      margin-left: 0.5em;
+      border-radius: 4px;
+      border: 1px solid #444;
+      background: #eee;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #ddd;
+    }
+  </style>
+</head>
+<body>
+  <img id="logo" src="/static/favicon.ico" alt="logo">
+  <div id="chat"></div>
+  <input id="msg" type="text" placeholder="say something..." autofocus>
+  <input id="img" type="file" accept="image/*">
+  <button onclick="sendMsg()">send</button>
+  <button onclick="clearChat()">clear chat</button>
+
+  <script>
+    const API_URL = "https://tick-mature-impala.ngrok-free.app/chat"; 
+    const chatBox = document.getElementById("chat");
+    const input = document.getElementById("msg");
+    const fileInput = document.getElementById("img");
+    let history = JSON.parse(localStorage.getItem("chatHistory") || "[]");
+
+    let currentRole = "assistant";
+
+    function formatTs(date) {
+      return date.getFullYear() + "." +
+        String(date.getMonth()+1).padStart(2,"0") + "." +
+        String(date.getDate()).padStart(2,"0") + " " +
+        String(date.getHours()).padStart(2,"0") + ":" +
+        String(date.getMinutes()).padStart(2,"0") + ":" +
+        String(date.getSeconds()).padStart(2,"0") + "." +
+        String(date.getMilliseconds()).padStart(3,"0");
+    }
+
+    function render() {
+      chatBox.innerHTML = history.map(m => {
+        const displayRole = m.role === "assistant" ? "computer" : m.role;
+        let text = `[${m.timestamp}] ${displayRole}: ${m.content || ""}`;
+        if (m.images) {
+          text += m.images.map(img => 
+            `<img class="msg-img" src="${img}" alt="sent image">`
+          ).join("");
+        }
+        return text;
+      }).join("<br><br>");
+      chatBox.scrollTop = chatBox.scrollHeight;
+      localStorage.setItem("chatHistory", JSON.stringify(history));
+    }
+
+    async function sendMsg() {
+      const text = input.value.trim();
+      const file = fileInput.files[0];
+      if (!text && !file) return;
+      input.value = "";
+      fileInput.value = "";
+
+      let images = [];
+      if (file) {
+        images = [await toBase64(file)];
+      }
+
+      const userMsg = { 
+        role: "user", 
+        content: text, 
+        images: images,
+        timestamp: formatTs(new Date()) 
+      };
+      history.push(userMsg);
+      render();
+
+      const messagesForServer = history.map(m => {
+        const base = { role: m.role, content: m.content };
+        if (m.images && m.images.length > 0) base.images = m.images;
+        return base;
+      });
+
+      try {
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: messagesForServer })
+        });
+        const data = await res.json();
+
+        if (data.role) currentRole = data.role;
+
+        const aiMsg = {
+          role: currentRole,
+          content: data.content,
+          timestamp: formatTs(new Date())
+        };
+        history.push(aiMsg);
+        render();
+      } catch (err) {
+        const errMsg = {
+          role: "assistant",
+          content: "error: " + err.message,
+          timestamp: formatTs(new Date())
+        };
+        history.push(errMsg);
+        render();
+      }
+    }
+
+    function clearChat() {
+      history = [];
+      localStorage.removeItem("chatHistory");
+      render();
+    }
+
+    function toBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+      });
+    }
+
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") sendMsg();
+    });
+
+    render();
+  </script>
+</body>
+</html>
